@@ -1,117 +1,206 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
+import React, { useState, useRef, useEffect } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, Image, Alert } from 'react-native';
+import { Camera, useCameraDevice, useCameraPermission, RecordVideoOptions } from 'react-native-vision-camera';
+import * as RNFS from 'react-native-fs';
+import Video from 'react-native-video';
 
-import React from 'react';
-import type {PropsWithChildren} from 'react';
-import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  View,
-} from 'react-native';
+const App: React.FC = () => {
+  const [cameraType, setCameraType] = useState<'front' | 'back'>('back');
+  const [zoom, setZoom] = useState(0);
+  const [mediaUri, setMediaUri] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const cameraRef = useRef<Camera>(null);
+  const { hasPermission, requestPermission } = useCameraPermission();
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+  const device = useCameraDevice(cameraType);
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
+  useEffect(() => {
+    if (!hasPermission) {
+      requestPermission();
+    }
+  }, [hasPermission, requestPermission]);
 
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
-}
-
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
+  const toggleCameraType = () => {
+    setCameraType(prevType => (prevType === 'back' ? 'front' : 'back'));
   };
 
+  const zoomIn = () => {
+    setZoom(prevZoom => Math.min(prevZoom + 0.1, 1));
+  };
+
+  const zoomOut = () => {
+    setZoom(prevZoom => Math.max(prevZoom - 0.1, 0));
+  };
+
+  const startRecording = async () => {
+    if (cameraRef.current) {
+      try {
+        setIsRecording(true);
+        const options: RecordVideoOptions = {
+          onRecordingFinished: async (video) => {
+            setMediaUri(`file://${video.path}`);
+            setIsRecording(false);
+          },
+          onRecordingError: (error) => {
+            console.error('Failed to record video:', error);
+            Alert.alert('Error', 'Failed to record video.');
+            setIsRecording(false);
+          },
+        };
+        await cameraRef.current.startRecording(options);
+      } catch (error) {
+        console.error('Failed to start recording:', error);
+        Alert.alert('Error', 'Failed to start recording.');
+        setIsRecording(false);
+      }
+    }
+  };
+
+  const stopRecording = async () => {
+    if (cameraRef.current && isRecording) {
+      try {
+        await cameraRef.current.stopRecording();
+      } catch (error) {
+        console.error('Failed to stop recording:', error);
+        Alert.alert('Error', 'Failed to stop recording.');
+      }
+    }
+  };
+
+  const takePhoto = async () => {
+    if (cameraRef.current) {
+      try {
+        const photo = await cameraRef.current.takePhoto();
+        const filePath = photo.path;
+
+        // Create 'capture' directory if it doesn't exist
+        const captureFolderPath = `${RNFS.DocumentDirectoryPath}/capture`;
+        await RNFS.mkdir(captureFolderPath);
+
+        // Move photo to 'capture' folder
+        const newFilePath = `${captureFolderPath}/${new Date().toISOString()}.jpg`;
+        await RNFS.moveFile(filePath, newFilePath);
+
+        setMediaUri(`file://${newFilePath}`);
+      } catch (error) {
+        console.error('Failed to take photo:', error);
+        Alert.alert('Error', 'Failed to capture photo.');
+      }
+    }
+  };
+
+  if (!hasPermission) {
+    return (
+      <View style={styles.container}>
+        <Text>Please grant camera permission.</Text>
+      </View>
+    );
+  }
+
+  if (device == null) {
+    return (
+      <View style={styles.container}>
+        <Text>No camera available.</Text>
+      </View>
+    );
+  }
+
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+    <View style={StyleSheet.absoluteFill}>
+      {mediaUri ? (
+        mediaUri.endsWith('.jpg') ? (
+          <Image source={{ uri: mediaUri }} style={StyleSheet.absoluteFill} />
+        ) : (
+          <Video
+            source={{ uri: mediaUri }}
+            style={StyleSheet.absoluteFill}
+            controls={true}
+            resizeMode="contain"
+          />
+        )
+      ) : (
+        <Camera
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          photo={true}
+          video={true}
+          device={device}
+          isActive={true}
+          zoom={zoom}
+        />
+      )}
+
+      {!mediaUri && (
+        <>
+          <TouchableOpacity style={styles.button} onPress={toggleCameraType}>
+            <Text style={styles.buttonText}>Switch</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.button, styles.zoomButton]} onPress={zoomIn}>
+            <Text style={styles.buttonText}>Zoom In</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.button, styles.zoomButton, styles.zoomOutButton]} onPress={zoomOut}>
+            <Text style={styles.buttonText}>Zoom Out</Text>
+          </TouchableOpacity>
+
+          {isRecording ? (
+            <TouchableOpacity style={styles.captureButton} onPress={stopRecording}>
+              <Text style={styles.buttonText}>Stop Recording</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.captureButton} onPress={startRecording}>
+              <Text style={styles.buttonText}>Record Video</Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity style={[styles.captureButton, { bottom: 100 }]} onPress={takePhoto}>
+            <Text style={styles.buttonText}>Capture Photo</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {mediaUri && (
+        <TouchableOpacity style={styles.captureButton} onPress={() => setMediaUri(null)}>
+          <Text style={styles.buttonText}>Back</Text>
+        </TouchableOpacity>
+      )}
+    </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
+  button: {
+    position: 'absolute',
+    right: 20,
+    bottom: 40,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 50,
+    padding: 10,
   },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
+  buttonText: {
+    color: 'white',
+    fontSize: 16,
+    textAlign: 'center',
   },
-  highlight: {
-    fontWeight: '700',
+  zoomButton: {
+    bottom: 100,
+  },
+  zoomOutButton: {
+    bottom: 160,
+  },
+  captureButton: {
+    position: 'absolute',
+    bottom: 40,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 50,
+    padding: 15,
   },
 });
 
